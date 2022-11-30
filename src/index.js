@@ -1,12 +1,11 @@
 const fs = require('fs')
 const path = require('path')
-const buffListSorted = require('./buff-list-sorted.json')
 const getSteamSoldInfo = require('./get-steam-sold-info')
 const getSteamItemId = require('./get-steam-item-id')
 const getSteamPriceInfo = require('./get-steam-price-info')
 const getBuffPrice = require('./get-buff-price')
-const list = require('./buff-list-1000')
 const express = require('express')
+const chalk = require('chalk')
 const app = express()
 const port = 3999
 
@@ -43,77 +42,130 @@ const trans = async (buff) => {
     updateTime: Date.now(),
   }
 }
+const w = (a) => {
+  if (a.steam24hSoldCount < 5) return a.discountMin
+
+  return (a.discountMin + a.discountMax) / 2 * Math.max(1 - a.steam24hSoldCount / 5, 0.9)
+}
+
+const sortFn = (a, b) => w(a) - w(b)
 
 
-const main = async () => {
+const list = require('./buff-list-full')
+const updateIdList = []
 
+const uniqueList = Array.from(list.reduce((acc, cur) => {
+  acc.set(cur.id, cur)
+  return acc
+}, new Map()).values())
 
+let sortedList = uniqueList.sort(sortFn).slice(0, 300)
+const otherList = uniqueList.slice(500)
 
+const update = async () => {
+  let buff
 
-  const buffList = buffListSorted.slice(0, 1000)
-
-  for (let i = list.length; i < buffList.length;) {
-    const buff = buffList[i]
-    try {
-      list.push(await trans(buff))
-    } catch (error) {
-      console.log(error.message)
-      await sleep(60000)
-      continue
-    }
-
-    console.log(i)
-
-    fs.writeFileSync(
-      path.resolve(__dirname, 'buff-list-1000.json'),
-      JSON.stringify(list, undefined, 2))
-
-    await sleep(20000)
-    i++
+  if (updateIdList.length) {
+    const id = updateIdList.shift()
+    buff = sortedList.find((v) => v.id === id)
+  }
+  if (!buff) {
+    buff = sortedList.sort((a, b) => a.updateTime - b.updateTime)[0]
   }
 
+  try {
+    const rst = await trans(buff)
+    if (rst.discountMin && rst.discountMax) {
+      Object.assign(buff, rst)
+      if (w(buff) <= 0.8) {
+        console.log(chalk.green(new Date(), buff.id, buff.name, buff.discountMin, buff.discountMax))
+      } else {
+        console.log(new Date(), buff.id, buff.name, buff.discountMin, buff.discountMax)
+      }
+
+      fs.writeFileSync(
+        path.resolve(__dirname, 'buff-list-full.json'),
+        JSON.stringify([...sortedList, ...otherList], undefined, 2))
+    }
+  } catch (error) {
+    console.log(chalk.red(new Date(), buff.id, buff.name, error.message))
+  }
+
+  await sleep(10000)
+}
+
+const main = async () => {
+  while (true) {
+    await update()
+  }
 }
 
 main()
 
 
 app.get('/', (req, res) => {
+
+
+
+
   res.send(`
-<table>
-  <thead>
-    <tr>
-      <th>id</th>
-      <th>name</th>
-      <th>steam24hSoldCount</th>
-      <th>steamBuyPriceMax</th>
-      <th>steamBuyPrice</th>
-      <th>steamSellPriceMin</th>
-      <th>steamSellPrice</th>
-      <th>buffPriceList</th>
-      <th>discountMin</th>
-      <th>discountMax</th>
-    </tr>
-  </thead>
-  <tbody>
-  ${list.sort((a, b) => a.discountMax - b.discountMax).map(v => `
-  <tr>
-    <th>${v.id}</th>
-    <th>${v.name}</th>
-    <th>${v.steam24hSoldCount}</th>
-    <th>${v.steamBuyPriceMax}</th>
-    <th>${v.steamBuyPrice}</th>
-    <th>${v.steamSellPriceMin}</th>
-    <th>${v.steamSellPrice}</th>
-    <th>${v.buffPriceList}</th>
-    <th>${v.discountMin}</th>
-    <th>${v.discountMax}</th>
-  </tr>
-  `).join('')}
-  </tbody>
-</table>
+<html>
+  <head>
+    <meta http-equiv="Refresh" content="10" />
+  </head>
+  <body>
+      <table>
+        <thead>
+          <tr>
+            <th>id</th>
+            <th>name</th>
+            <th>24</th>
+            <th>buy-max</th>
+            <th>buy-avg</th>
+            <th>sell-min</th>
+            <th>sell-avg</th>
+            <th>buff-price</th>
+            <th>discountMin</th>
+            <th>discountMax</th>
+            <th>buff</th>
+            <th>steam</th>
+            <th>sort</th>
+          </tr>
+        </thead>
+        <tbody>
+        ${sortedList.sort(sortFn).map(v => `
+        <tr>
+          <th>${v.id}</th>
+          <th>${v.name}</th>
+          <th>${v.steam24hSoldCount}</th>
+          <th>${v.steamBuyPriceMax}</th>
+          <th>${v.steamBuyPrice}</th>
+          <th>${v.steamSellPriceMin}</th>
+          <th>${v.steamSellPrice}</th>
+          <th>${v.buffPriceList}</th>
+          <th>${v.discountMin}</th>
+          <th>${v.discountMax}</th>
+          <th><a href="https://buff.163.com/goods/${v.id}" target="_blank">buff</a></th>
+          <th><a href="${v.steam_market_url}" target="_blank">steam</a></th>
+          <th>${updateIdList.includes(v.id) ? '' : `<button onClick="fetch('./update?id=${v.id}').then(()=>location.reload())">${((Date.now() - v.updateTime) / 1000 / 60 / 60 | 0).toString().padStart(2, '0')}:${(((Date.now() - v.updateTime) / 1000 / 60 | 0) % 60).toString().padStart(2, '0')}</button>`}</th>
+          <th>${w(v).toFixed(2)}</th>
+        </tr>
+        `).join('')}
+        </tbody>
+      </table>
+  </body>
+</html>
 `)
 })
 
+app.get('/update', (req, res) => {
+  const { id } = req.query
+  if (id && !updateIdList.includes(id)) {
+    updateIdList.push(Number(id))
+  }
+  res.send('ok')
+})
+
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`)
+  console.log(`Example app listening on port http:127.0.0.1:${port}`)
 })

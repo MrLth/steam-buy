@@ -11,7 +11,7 @@ const getSteamSoldInfo = async (appid, market_hash_name) => {
     }
   })
 
-  return Number(rst.data.volume.replace(',', ''))
+  return Number(rst.data.volume?.replace(',', '') || 0)
 }
 
 module.exports = getSteamSoldInfo
