@@ -59,7 +59,7 @@ const uniqueList = Array.from(list.reduce((acc, cur) => {
   return acc
 }, new Map()).values())
 
-let sortedList = uniqueList.sort(sortFn).slice(0, 300)
+let sortedList = uniqueList.sort(sortFn).slice(0, 1000)
 const otherList = uniqueList.slice(500)
 
 const update = async () => {
